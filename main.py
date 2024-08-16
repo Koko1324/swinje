@@ -1,18 +1,15 @@
 import streamlit as st
 import tensorflow as tf
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense
-from tensorflow.keras.preprocessing.image import ImageDataGenerator, img_to_array
 import numpy as np
 import cv2
-import matplotlib.pyplot as plt
 from PIL import Image
 import sounddevice as sd
+import time
 
 # Streamlit 페이지 설정
 st.set_page_config(layout="wide")
 
-# 로고 이미지 로드 및 레이아웃 설정
+# 로고 이미지와 공부 모드 선택
 logo = Image.open("logo.png")
 header_col1, header_col2 = st.columns([1, 6])
 with header_col1:
@@ -20,98 +17,145 @@ with header_col1:
 with header_col2:
     option = st.selectbox(
         "공부 모드 선택",
-        ["캠 공부", "데시벨 공부", "캠+데시벨 공부"]
+        ["캠 공부", "데시벨 공부", "캠+데시벨 공부"],
+        key='selectbox_option'
     )
 
-model = tf.keras.models.load_model('sleep_detection_model.h5')
+# 타이머와 상태 초기화
+if 'start_time' not in st.session_state:
+    st.session_state.start_time = None
+if 'elapsed_time' not in st.session_state:
+    st.session_state.elapsed_time = 0
+if 'is_studying' not in st.session_state:
+    st.session_state.is_studying = False
+if 'sleep_time' not in st.session_state:
+    st.session_state.sleep_time = 0  # 잠을 잔 시간
+if 'last_face_detected_time' not in st.session_state:
+    st.session_state.last_face_detected_time = None  # 마지막으로 얼굴이 인식된 시간
+if 'is_sleeping' not in st.session_state:
+    st.session_state.is_sleeping = False
+if 'db_level' not in st.session_state:  # db_level 초기화
+    st.session_state.db_level = 0
 
-# 웹캠 예측 기능
+
+# 타이머 표시 함수
+def display_timer():
+    elapsed_time = st.session_state.elapsed_time + (time.time() - st.session_state.start_time)
+    sleep_time = st.session_state.sleep_time
+    total_study_time = elapsed_time - sleep_time
+    return time.strftime('%H:%M:%S', time.gmtime(total_study_time)), time.strftime('%H:%M:%S', time.gmtime(sleep_time))
+
+# 공부 시작하기 버튼 클릭 시
+if st.button("공부 시작하기", key="start_button"):
+    st.session_state.start_time = time.time()
+    st.session_state.is_studying = True
+    st.session_state.last_face_detected_time = time.time()
+    st.write("공부를 시작합니다!")
+
+# 공부 그만하기 버튼 클릭 시
+if st.button("공부 그만하기", key="stop_button"):
+    if st.session_state.is_studying:
+        st.session_state.elapsed_time += time.time() - st.session_state.start_time
+        st.session_state.is_studying = False
+
+        # 총 공부 시간에서 잠을 잔 시간을 뺀다
+        total_study_time = st.session_state.elapsed_time - st.session_state.sleep_time
+        if total_study_time < 0:
+            total_study_time = 0
+
+        st.write("공부를 종료합니다!")
+        st.write(f"총 공부 시간: {time.strftime('%H:%M:%S', time.gmtime(total_study_time))}")
+        st.write(f"잠을 잔 시간: {time.strftime('%H:%M:%S', time.gmtime(st.session_state.sleep_time))}")
+
+# 캠 공부 기능
 if option == "캠 공부" or option == "캠+데시벨 공부":
-    st.write("웹캠을 통해 실시간 예측을 시작합니다.")
-    
-    # Haar Cascade 얼굴 검출기 로드
-    face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+    if st.session_state.is_studying:
+        st.write("웹캠을 통해 실시간 예측을 시작합니다.")
+        
+        # 얼굴 검출기 로드
+        face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
 
-    # 웹캠을 통해 실시간으로 영상을 가져옵니다.
-    cap = cv2.VideoCapture(0)  # 카메라를 열어 캡처 시작
-
-    while True:
-        ret, frame = cap.read()  # 비디오 프레임을 읽어옵니다.
-        if not ret:
-            break
-
-        # 프레임을 회색조로 변환하여 얼굴 검출
-        gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        faces = face_cascade.detectMultiScale(gray_frame, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
-
-        if len(faces) == 0:
-            a = 2  # 얼굴이 인식되지 않으면 a에 2 저장
-            cv2.putText(frame, "No person detected", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 0), 2, cv2.LINE_AA)
+        # 웹캠 열기
+        cap = cv2.VideoCapture(0)
+        if not cap.isOpened():
+            st.error("웹캠을 열 수 없습니다.")
         else:
-            (x, y, w, h) = faces[0]  # 첫 번째 얼굴 영역 선택
-            face_roi = frame[y:y+h, x:x+w]
+            stframe = st.empty()  # Streamlit에서 이미지를 표시할 공간
+            timer_placeholder = st.empty()  # 타이머를 표시할 공간
 
-            # 얼굴 영역을 128x128 크기로 조정
-            resized_frame = cv2.resize(face_roi, (128, 128))
-            img_array = img_to_array(resized_frame)
-            img_array = np.expand_dims(img_array, axis=0)
-            img_array /= 255.0  # 정규화
+            # 스트림 프레임을 위해 FPS 설정
+            cap.set(cv2.CAP_PROP_FPS, 24)
 
-            prediction = model.predict(img_array)
-            a = 1 if prediction[0] > 0.5 else 0  # 예측에 따라 a 설정
+            while st.session_state.is_studying:
+                ret, frame = cap.read()
+                if not ret:
+                    st.write("비디오 프레임을 읽을 수 없습니다.")
+                    break
 
-            # 결과를 프레임에 출력
-            if a == 1:
-                cv2.putText(frame, "Sleeping", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2, cv2.LINE_AA)
-            elif a == 0:
-                cv2.putText(frame, "Awake", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
+                # 얼굴 검출
+                gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                faces = face_cascade.detectMultiScale(gray_frame, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
 
-        # 프레임을 화면에 표시
-        cv2.imshow('Sleep Detection', frame)
+                if len(faces) > 0:
+                    # 얼굴이 감지되면 잠에서 깨어 있는 것으로 간주
+                    st.session_state.last_face_detected_time = time.time()
+                    st.session_state.is_sleeping = False
+                    cv2.putText(frame, "Awake", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
+                else:
+                    # 얼굴이 1분 이상 감지되지 않으면 잠을 자는 것으로 간주
+                    time_since_last_face_detected = time.time() - st.session_state.last_face_detected_time
+                    if time_since_last_face_detected >= 60:  # 1분 이상 얼굴이 감지되지 않은 경우
+                        if not st.session_state.is_sleeping:
+                            st.session_state.is_sleeping = True
+                            st.session_state.sleep_time += time_since_last_face_detected
 
-        # 'q' 키를 누르면 루프를 종료
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
+                        cv2.putText(frame, "Sleeping or Not Present", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2, cv2.LINE_AA)
 
-    # 모든 자원 해제
-    cap.release()
-    cv2.destroyAllWindows()
+                # Streamlit에서 프레임 표시
+                stframe.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), use_column_width=True)
+
+                # 타이머 실시간 업데이트
+                total_study_time_str, sleep_time_str = display_timer()
+                timer_placeholder.metric(label="총 공부 시간", value=total_study_time_str)
+                timer_placeholder.metric(label="잠을 잔 시간", value=sleep_time_str)
+
+            cap.release()
+            cv2.destroyAllWindows()
 
 # 데시벨 측정 기능
 if option == "데시벨 공부" or option == "캠+데시벨 공부":
-    st.write("주변 소리의 데시벨을 측정합니다.")
-    
-    def calculate_decibel_level(audio_data):
-        """ 오디오 데이터에서 데시벨 수준을 계산하는 함수 """
-        rms = np.sqrt(np.mean(np.square(audio_data)))  # RMS 계산
-        if rms > 0:
-            db = 20 * np.log10(rms)  # 데시벨로 변환
-        else:
-            db = 0
-        return db
+    if st.session_state.is_studying:
+        st.write("주변 소리의 데시벨을 실시간으로 측정합니다.")
 
-    def audio_callback(indata, frames, time, status):
-        """ 오디오 스트림에서 호출되는 콜백 함수 """
-        if status:
-            print(status, flush=True)
-        audio_data = indata[:, 0]  # 모노 채널 선택
-        db_level = calculate_decibel_level(audio_data)  # 데시벨 수준 계산
-        print(f"Decibel Level: {db_level:.2f} dB")  # 콘솔에 출력
-        global b
-        b = 1 if db_level > 80 else 0  # 데시벨이 80을 초과하면 b에 1 저장
-        print(f"Variable b: {b}")
+        def calculate_decibel_level(audio_data):
+            """ 오디오 데이터에서 데시벨 수준을 계산하는 함수 """
+            if len(audio_data) == 0:
+                return 0
+            rms = np.sqrt(np.mean(np.square(audio_data)))
+            return 20 * np.log10(rms) if rms > 0 else 0
 
-    # 변수 초기화
-    b = 0
+        def audio_callback(indata, frames, time, status):
+            """ 오디오 스트림에서 호출되는 콜백 함수 """
+            if status:
+                st.warning(f"Audio stream status: {status}")
+            audio_data = indata[:, 0]
+            if len(audio_data) > 0:  # Ensure audio_data is not empty
+                db_level = calculate_decibel_level(audio_data)
+                st.session_state.db_level = db_level
 
-    # 오디오 스트림 설정
-    try:
-        with sd.InputStream(callback=audio_callback, channels=1, samplerate=44100):
-            print("Listening...")
-            sd.sleep(10000)  # 10초 동안 오디오 입력 처리
-    except KeyboardInterrupt:
-        print("Interrupted by user.")
-    except Exception as e:
-        print(f"Error: {e}")
-    if b == 1:
-        st.title("공부하기 적절하지 않은 데시벨의 소음이 존재하므로 공부 장소를 옮기시는 것을 추천드립니다.")
+        # 실시간으로 데시벨을 표시할 공간
+        db_placeholder = st.empty()
+
+        try:
+            with sd.InputStream(callback=audio_callback, channels=1, samplerate=44100):
+                st.write("Listening...")
+                while st.session_state.is_studying:
+                    db_placeholder.write(f"Decibel Level: {st.session_state.db_level:.2f} dB")
+                    time.sleep(0.5)  # 0.5초마다 업데이트
+        except KeyboardInterrupt:
+            st.write("Interrupted by user.")
+        except Exception as e:
+            st.error(f"Error: {e}")
+
+        if st.session_state.db_level > 80:
+            st.title("공부하기 적절하지 않은 데시벨의 소음이 존재하므로 공부 장소를 옮기시는 것을 추천드립니다.")
