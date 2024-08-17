@@ -24,8 +24,8 @@ with header_col2:
 # 상태 초기화 (타이머와 상태 관리를 위한 세션 상태 변수 설정)
 if 'start_time' not in st.session_state:
     st.session_state.start_time = None
-if 'elapsed_time' not in st.session_state:
-    st.session_state.elapsed_time = 0
+#if 'elapsed_time' not in st.session_state:
+#   st.session_state.elapsed_time = 0 #경과 시간
 if 'is_studying' not in st.session_state:
     st.session_state.is_studying = False
 if 'sleep_time' not in st.session_state:
@@ -50,7 +50,8 @@ if 'accumulated_sleep_time' not in st.session_state:
 
 def display_timer():
     """ 타이머를 계산하여 총 공부 시간과 잠을 잔 시간을 포맷하여 반환하는 함수 """
-    elapsed_time = st.session_state.elapsed_time + (time.time() - st.session_state.start_time)
+    #elapsed_time = st.session_state.elapsed_time + (time.time() - st.session_state.start_time)
+    elapsed_time = time.time() - st.session_state.start_time
     sleep_time = st.session_state.accumulated_sleep_time  # 누적 잠을 잔 시간
     total_study_time = elapsed_time - sleep_time
     return time.strftime('%H:%M:%S', time.gmtime(total_study_time)), time.strftime('%H:%M:%S', time.gmtime(sleep_time))
@@ -68,9 +69,9 @@ if st.button("공부 시작하기", key="start_button"):
 # 공부 그만하기 버튼 클릭 시
 if st.button("공부 그만하기", key="stop_button"):
     if st.session_state.is_studying:
-        st.session_state.elapsed_time += time.time() - st.session_state.start_time  # 총 경과 시간 업데이트
+        #st.session_state.elapsed_time += time.time() - st.session_state.start_time  # 총 경과 시간 업데이트
         st.session_state.is_studying = False  # 공부 중 상태 해제
-        total_study_time = st.session_state.elapsed_time - st.session_state.accumulated_sleep_time
+        #total_study_time = st.session_state.elapsed_time - st.session_state.accumulated_sleep_time
         if total_study_time < 0:
             total_study_time = 0
         st.write("공부를 종료합니다!")
@@ -80,7 +81,7 @@ if st.button("공부 그만하기", key="stop_button"):
 # 웹캠과 오디오 스트림을 동시에 처리하는 함수
 def process_camera_and_audio():
     # 웹캠 얼굴 인식을 위한 설정
-    face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+    face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml') #haarcascade불러오기
     cap = cv2.VideoCapture(0)  # 웹캠 열기
     if not cap.isOpened():
         st.error("웹캠을 열 수 없습니다.")
@@ -121,6 +122,7 @@ def process_camera_and_audio():
 
     cap.set(cv2.CAP_PROP_FPS, 24)  # FPS 설정
 
+    #예외 처리
     try:
         with sd.InputStream(callback=audio_callback, channels=1, samplerate=44100):
             st.write("Listening and watching...")
