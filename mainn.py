@@ -46,7 +46,7 @@ if 'accumulated_sleep_time' not in st.session_state:
     st.session_state.accumulated_sleep_time = 0  # 누적 잠을 잔 시간
 
 # 모델 로드 (수면 감지 모델)
-model = tf.keras.models.load_model('sleep_detection_model.h5')
+#model = tf.keras.models.load_model('sleep_detection_model.h5')
 
 def display_timer():
     """ 타이머를 계산하여 총 공부 시간과 잠을 잔 시간을 포맷하여 반환하는 함수 """
